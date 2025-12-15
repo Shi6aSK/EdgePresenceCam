@@ -1,49 +1,36 @@
-# EdgePresenceCam — technical README
+# EdgePresenceCam — firmware & developer README
 
-This repository contains the firmware and tools for EdgePresenceCam: an edge device built around the Seeed XIAO ESP32 S3 that integrates a 24GHz mmWave presence sensor (LD2410-like), an esp_camera module (MJPEG), and a small audio-capture flow persisted to LittleFS. The project demonstrates a wake-on-presence pipeline: radar frame -> parser -> wake camera/microphone -> capture -> local storage and optional proxy upload.
+This repository contains the firmware and tools for EdgePresenceCam: a Seeed XIAO ESP32 S3 device that combines a 24 GHz presence radar (LD2410-like), an ESP camera (MJPEG), and a small audio capture flow persisted to LittleFS. This README focuses on practical setup, build, run, and diagnostics for developers and graders.
 
-This README is the technical GitHub README (setup, wiring, build, run, endpoints, and troubleshooting). The formal project report and slides are separate artifacts.
-
-Contents
-- Firmware: `CPRE4580.ino` (main), `radar.cpp/h`, `web.cpp/h`, `camera.cpp/h`, `modules/` (audio, cloud, manager).  
-- Tools: `tools/esp_proxy.py` — laptop proxy to forward audio to OpenAI.
-- Tests: `mmwave_test/` — `mmwave_test.ino` (library example) and `mmwave_sniffer.ino` (UART sniffer).
+Quick summary
+- Firmware entry: `CPRE4580.ino`
+- Key modules: `radar.*`, `web.*`, `camera.*`, `modules/audio.*`, `log.*`
+- Tools: `tools/esp_proxy.py` — laptop proxy to forward audio to OpenAI and save uploads at `tools/uploads/`
 
 Requirements
-- Hardware
-  - Seeed XIAO ESP32 S3 (or compatible XIAO ESP32 board)
-  - 24GHz mmWave presence sensor (LD2410-like)
-  - Camera module supported by `esp_camera` (check `camera_pins.h` for pin mapping)
-  - USB cable, common ground between sensor and XIAO
-- Software (development)
-  - Arduino IDE (or `arduino-cli`) with ESP32 board support (esp32:esp32)
-  - Python 3 (for `tools/esp_proxy.py`), requests & flask as required
-  - Optional: HLKRadarTool (mobile app) to change sensor baud (recommended when using SoftwareSerial)
+- Hardware: Seeed XIAO ESP32 S3 (or compatible), LD2410-like mmWave sensor, compatible camera module, USB cable, common ground between sensor and XIAO.
+- Software: Arduino IDE or `arduino-cli` with esp32 board package; Python 3 for the proxy (Flask + requests). Optional: HLKRadarTool for changing radar baud.
 
 Wiring (recommended)
 - Sensor TX -> XIAO RX (D2)
 - Sensor RX <- XIAO TX (D3)
 - Common GND
-- Camera pins: see [camera_pins.h](camera_pins.h) for board-specific mapping
+- Camera pins: see [camera_pins.h](camera_pins.h)
 
-Notes about baud
-- Factory sensor baud is 256000. XIAO software serial implementations may not reliably handle 256k; recommended: set sensor to 9600 with HLKRadarTool for the example sketches that use software serial. For production/demo use, prefer hardware `Serial1` (the firmware uses `Serial1`) and 256000 may work depending on board variant.
+Baud notes
+- The sensor ships at 256000 baud. Use hardware `Serial1` on the XIAO for 256000. For software-serial examples, set sensor to 9600 with HLKRadarTool.
 
-Install libraries (recommended)
-1. Clone / add libraries to Arduino libraries folder:
+Install libraries
+1. Clone required libraries into your Arduino libraries folder (if you haven't):
 
 ```powershell
 cd "$env:USERPROFILE\Documents\Arduino\libraries"
 git clone https://github.com/limengdu/mmwave_for_XIAO.git mmwave_for_XIAO
-git clone https://github.com/plerup/espsoftwareserial.git espsoftwareserial  # optional
 ```
 
-2. Restart the Arduino IDE.
-
-Build & upload (Arduino IDE)
-- Open `CPRE4580.ino` in Arduino IDE, select board `XIAO_ESP32S3` (or your XIAO variant), set upload speed and COM port, then Upload.
-
-Build & upload (arduino-cli)
+Build & upload
+- Arduino IDE: open `CPRE4580.ino`, select `XIAO_ESP32S3`, compile & upload.
+- arduino-cli:
 
 ```powershell
 cd 'C:\Users\ssk20\Documents\Arduino\CPRE4580'
@@ -51,23 +38,32 @@ arduino-cli compile --fqbn esp32:esp32:XIAO_ESP32S3
 arduino-cli upload --fqbn esp32:esp32:XIAO_ESP32S3 -p COM3
 ```
 
-Running the system (quickstart)
-1. Power the XIAO and confirm it connects to Wi‑Fi (check Serial at 115200 for IP).  
-2. Open the dashboard at `http://<device-ip>/` (contains MJPEG stream and controls).  
-3. Use `/radar/raw` to inspect last raw frame hex and `/radar/history` for recent events.  
+Run quickstart
+1. Power the board and watch Serial at 115200 for Wi‑Fi or AP IP.
+2. Open `http://<device-ip>/` — dashboard includes MJPEG preview, radar status, logs, and audio controls.
 
-Key HTTP endpoints
-- `/` — dashboard UI (camera, radar status, audio controls)
-- `/stream` — MJPEG camera stream
-- `/radar` — JSON current radar summary
-- `/radar/raw` — raw last frame hex + legacy_info
-- `/radar/history` — circular history JSON of recent RadarEvent entries
-- `/uart/sniff` — toggle UART sniffer on/off (prints hex to Serial when enabled)
-- `/audio/start` — trigger a local audio capture (WAV saved to LittleFS)
-- `/audio/latest.wav` — download last saved WAV
-- `/audio/upload` — device-initiated upload to configured proxy or direct OpenAI (proxy recommended)
+HTTP endpoints (most useful)
+- `/` — dashboard UI (camera, radar plot, OpenAI test box, audio controls)
+- `/stream` — MJPEG stream (multipart)
+- `/camera.jpg` — single JPEG snapshot
+- `/status` — JSON device status
+- `/radar` — current radar summary JSON
+- `/radar/raw` — last raw frame hex + legacy info
+- `/radar/history` — JSON circular history (used by dashboard canvas)
+- `/uart/sniff?on=1` — enable UART sniffer (prints hex to Serial)
+- `/audio/start?dur=3000` — start local audio capture (ms)
+- `/audio/latest.wav` — download last WAV
+- `/audio/proxy` — GET/POST to set proxy URL stored at `/upload_proxy.txt`
+- `/audio/apikey` — POST to store OpenAI key at `/openai_key.txt` (GET returns presence)
+- `/audio/upload` — POST triggered upload/transcribe (uses proxy if configured)
+- `/openai/test` — POST raw prompt text; device uses stored OpenAI key to call Chat Completions and returns JSON
 
-Using the proxy for OpenAI uploads (recommended)
+Dashboard features
+- MJPEG preview (via `/stream`) and single-shot image refresh (`/camera.jpg`).
+- Radar timeline canvas (uses `/radar/history`) showing recent states.
+- OpenAI test box: enter a prompt, click "Send Prompt" — device will call `/openai/test` and display returned JSON.
+
+Using the proxy (recommended for OpenAI uploads)
 1. On your laptop, run the proxy in `tools/`:
 
 ```powershell
@@ -75,40 +71,37 @@ cd 'C:\Users\ssk20\Documents\Arduino\CPRE4580\tools'
 python .\esp_proxy.py --key <OPENAI_KEY> --port 5000
 ```
 
-2. Configure the device proxy URL via the dashboard (`/audio/proxy` endpoint) or edit `web.cpp` default.
-3. Trigger `/audio/upload` from the device; the proxy will save uploaded files into `tools/uploads/` and forward to OpenAI.
+2. Set device proxy via dashboard or:
+
+```powershell
+curl -X POST http://<device-ip>/audio/proxy -d "http://<laptop-ip>:5000/upload"
+```
+
+3. Trigger `/audio/upload` on the device; the proxy saves uploaded files to `tools/uploads/` and forwards to OpenAI.
 
 Testing & diagnostics
-- UART sniffer: flash `mmwave_test/mmwave_sniffer.ino`, open Serial Monitor at 115200. It prints incoming bytes from `Serial1` in hex and ASCII — use this to confirm wiring, baud, and frame content.
-- Library test: `mmwave_test/mmwave_test.ino` uses `Seeed_HSP24` library to exercise the sensor API (requires `mmwave_for_XIAO` library installed).
-- Logs: the firmware maintains an in-memory circular `log` and exposes `/logs` for debugging. `log_append()` is used in code paths to record events.
-
-Developer notes (key files)
-- `CPRE4580.ino` — main initialization and task startup
-- `radar.cpp`, `radar.h` — Serial1 reading, frame parsing, history buffer, and sniffer
-- `web.cpp`, `web.h` — HTTP endpoints and dashboard assets
-- `camera.cpp`, `camera.h`, `camera_pins.h` — camera init and pin definitions
-- `modules/audio.cpp` — WAV writer and LittleFS handling
-- `log.cpp`, `log.h` — simple circular logging API
-- `tools/esp_proxy.py` — laptop relay for audio uploads to OpenAI
+- UART sniffer: flash `mmwave_test/mmwave_sniffer.ino` and open Serial Monitor at 115200 to capture raw UART bytes.
+- Raw frames: GET `/radar/raw` to fetch `last_frame_hex` for parser tuning.
+- Logs: GET `/logs` for recent trace entries (the firmware uses `log_append()` in key paths).
+- Capture test: click "Start Capture" on dashboard and then "Upload & Transcribe" to exercise the upload flow.
 
 Troubleshooting
-- No bytes visible in sniffer: check wiring (sensor TX → XIAO RX), common ground, power to sensor. Try both 9600 and 256000 baud. If RX floats, enable hardware pull-down or add small pulldown resistor.  
-- Garbled frames: likely wrong baud or software serial limits; switch to hardware `Serial1` or lower sensor baud using HLKRadarTool.  
-- LittleFS errors: ensure LittleFS.begin() is called; if fail, firmware attempts format on first mount (see `modules/audio.cpp`).  
-- OpenAI upload failures: check proxy logs in `tools/uploads/`, verify API key and that proxy forwarded request matches OpenAI multipart/form-data expectations. Proxy logs are printed to console.
+- No bytes in sniffer: check sensor TX->XIAO RX wiring, common ground, and sensor power. Try 9600 and 256000 baud.
+- Garbled frames: likely baud mismatch or software-serial limit — use hardware `Serial1` and 256000 where possible.
+- LittleFS issues: firmware tries to mount and format on first run; check Serial for errors.
+- OpenAI errors: check `tools/uploads/` and proxy console for saved uploads and forwarding errors. Verify API key and scopes.
 
-Security and privacy notes
-- Audio and camera data can be sensitive. The default behavior saves audio locally; uploads are performed only if proxy or direct upload is configured. Keep API keys off the device where possible and use the laptop proxy approach.
+Developer notes
+- Relevant files: `CPRE4580.ino`, `radar.cpp/h`, `web.cpp/h`, `camera.cpp/h`, `modules/audio.cpp`, `log.cpp/h`, `tools/esp_proxy.py`.
+- To collect radar samples for parser tuning: enable the UART sniffer, capture several frames from Serial, and paste hex output into an issue or to the repo's `docs/` folder.
 
-Contributing
-- Fork, create a branch, and open a PR. Document any hardware changes in `docs/` and add sample logs for parser improvements.
+Contributing & License
+- Fork, branch, and PR. Add hardware photos and sniffer logs in `docs/` when improving parser.
+- Add a `LICENSE` file at repo root for your chosen license.
 
-License
-- Add appropriate license file at repository root (e.g., `LICENSE`).
+Contact
+- When reporting issues, include Serial logs and `/radar/raw` output.
 
-Contact / Support
-- For help, provide serial logs and `/radar/raw` output when opening an issue.
 # EdgePresenceCam — XIAO ESP32 S3 mmWave + Camera Integration
 
 Project type: Embedded IoT + Real-Time Demonstration
