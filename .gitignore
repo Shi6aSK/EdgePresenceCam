@@ -1,0 +1,32 @@
+# Build artifacts
+build/
+*.elf
+*.bin
+*.hex
+*.map
+*.tmp
+
+# Arduino / PlatformIO cache
+.pio/
+.arduino15/
+
+# IDE/editor folders
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+
+# Tool uploads and saved proxies
+tools/uploads/
+
+# Local env / secrets
+.env
+*.key
+*.pem
+
+# Misc
+*.log
+*.db
