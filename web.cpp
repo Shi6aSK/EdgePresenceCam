@@ -391,6 +391,18 @@ void web_init() {
         <h4>Transcription</h4>
         <pre id=transcript>no transcription yet</pre>
       </div>
+      <div style="margin-top:12px">
+        <h4>OpenAI Text Test</h4>
+        <textarea id=openai_prompt style="width:100%;height:80px" placeholder="Enter prompt to send to OpenAI..."></textarea>
+        <div style="margin-top:6px">
+          <button onclick=sendOpenAITest()>Send Prompt</button>
+          <span style="margin-left:12px;color:#666">(uses stored API key at /openai_key.txt)</span>
+        </div>
+        <div style="margin-top:8px">
+          <h5>Response</h5>
+          <pre id=openai_response>no response yet</pre>
+        </div>
+      </div>
     </div>
     <script>
       async function fetchStatus(){
@@ -451,6 +463,18 @@ void web_init() {
           const j = await r.json();
           document.getElementById('transcript').textContent = JSON.stringify(j, null, 2);
         }catch(e){ document.getElementById('transcript').textContent = 'transcribe error'; }
+      }
+
+      async function sendOpenAITest(){
+        try{
+          const prompt = document.getElementById('openai_prompt').value || '';
+          if (!prompt || prompt.length < 2) { alert('enter a prompt'); return; }
+          document.getElementById('openai_response').textContent = 'sending...';
+          const r = await fetch('/openai/test', { method:'POST', body: prompt });
+          if (!r.ok) { document.getElementById('openai_response').textContent = 'request failed: ' + r.status; return; }
+          const j = await r.json();
+          document.getElementById('openai_response').textContent = JSON.stringify(j, null, 2);
+        } catch(e) { document.getElementById('openai_response').textContent = 'error'; }
       }
 
       async function fetchKeyStatus(){
@@ -521,6 +545,46 @@ void web_init() {
   server.on("/radar/history", HTTP_GET, []() {
     String j = radar_get_history_json();
     server.send(200, "application/json", j);
+  });
+
+  // Simple OpenAI test endpoint: POST raw text body -> chat completion using
+  // stored API key at /openai_key.txt. Returns JSON from OpenAI or error.
+  server.on("/openai/test", HTTP_ANY, []() {
+    if (server.method() != HTTP_POST) { server.send(405, "text/plain", "only POST"); return; }
+    String prompt = server.hasArg("plain") ? server.arg("plain") : String();
+    if (prompt.length() == 0) { server.send(400, "application/json", "{\"error\":\"missing_prompt\"}"); return; }
+    const char* keyPath = "/openai_key.txt";
+    if (!LittleFS.begin()) LittleFS.begin();
+    if (!LittleFS.exists(keyPath)) { server.send(400, "application/json", "{\"error\":\"no_api_key\"}"); return; }
+    File kf = LittleFS.open(keyPath, FILE_READ);
+    if (!kf) { server.send(500, "application/json", "{\"error\":\"key_open_failed\"}"); return; }
+    String key = kf.readString(); kf.close(); key.trim();
+
+    const char* host = "api.openai.com";
+    const char* path = "/v1/chat/completions";
+    String body = String("{\"model\":\"gpt-3.5-turbo\",\"messages\":[{\"role\":\"user\",\"content\":\"") + prompt + "\"}],\"max_tokens\":150}";
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    if (!client.connect(host, 443)) { server.send(502, "application/json", "{\"error\":\"tls_connect_failed\"}"); return; }
+    client.printf("POST %s HTTP/1.1\r\n", path);
+    client.printf("Host: %s\r\n", host);
+    client.printf("Authorization: Bearer %s\r\n", key.c_str());
+    client.print("Content-Type: application/json\r\n");
+    client.printf("Content-Length: %u\r\n", (unsigned int)body.length());
+    client.print("Connection: close\r\n\r\n");
+    client.print(body);
+
+    unsigned long start = millis(); String resp;
+    while (client.connected() && (millis() - start) < 15000) {
+      while (client.available()) { resp += (char)client.read(); start = millis(); }
+      delay(5);
+    }
+    client.stop();
+    int idx = resp.indexOf("\r\n\r\n"); String respBody = resp;
+    if (idx >= 0) respBody = resp.substring(idx + 4);
+    if (respBody.length() == 0) { server.send(502, "application/json", "{\"error\":\"no_response\"}"); return; }
+    server.send(200, "application/json", respBody);
   });
 
   // Raw radar frame / debug endpoint
