@@ -103,4 +103,3 @@ Security and privacy notes
 
 Contact / Support
 - For help, provide serial logs and `/radar/raw` output when opening an issue.
-# EdgePresenceCam — XIAO ESP32 S3 mmWave + Camera Integration
