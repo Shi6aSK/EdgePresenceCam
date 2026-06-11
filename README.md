@@ -103,3 +103,7 @@ Security and privacy notes
 
 Contact / Support
 - For help, provide serial logs and `/radar/raw` output when opening an issue.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
